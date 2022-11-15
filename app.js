@@ -4,32 +4,47 @@ const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
 const app = express();
-// const md5 = require("md5");
-const bcrypt = require("bcrypt");
-const saltRounds = 10;
+// Make sure to follow this exacat order
+var session = require("express-session");
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
 
 app.use(express.static("public"));
 app.set("view engine", "ejs")
 app.use(bodyParser.urlencoded({extended: true}));
 
-mongoose.connect("mongodb://localhost:27017/userDB", {family: 4});
 
+////////////////// setup SESSION make sure to place it right where it is /////////////////////////////
+app.use(session({
+    secret: "Our little secret.",
+    resave: false,
+    saveUninitialized: false
+}))
+
+///////////// Setup PASSPORT ///////////////////////
+app.use(passport.initialize());
+app.use(passport.session()); 
+
+
+
+mongoose.connect("mongodb://localhost:27017/userDB", {family: 4});
+     
 const userSchema = new mongoose.Schema ({
     email: String,
     password: String
 });
 
-// To see the files in the .env file use the following syntax
-// console.log(process.env.API_KEY);
-
-
-// Create a secrete constant to procceed with the encryption. This is the key
-
-// const secret = "Thisisoutlittlesecret";
-// This however will encrypt the entire database, so we need to add encryptedfields
-// userSchema.plugin(encrypt, {secret: process.env.SECRET, encryptedFields: ["password"] });            
+// The following will hash and salt our passwords, aswell as to save the data in mongodb
+userSchema.plugin(passportLocalMongoose);
 
 const User = new mongoose.model("User", userSchema)
+
+passport.use(User.createStrategy());
+
+// Serialize creates the cookie
+passport.serializeUser(User.serializeUser());
+//  Deserialize breaks the cookie and allows the browser to see whats inside of it
+passport.deserializeUser(User.deserializeUser());
 
 
 
@@ -47,61 +62,55 @@ app.get("/register", function(req, res){
     res.render("register");
 });
 
-app.post("/register", function(req, res){
-    ////////// This is how to use bcrypt /////////////////
-    bcrypt.hash(req.body.password, saltRounds, function(err, hash){
-        const newUser = new User({
-            email: req.body.username,
-            // Use the hash function
-            password: hash
-    });
+app.get("/secrets", function(req, res){
+    // Check if user is authentificated
+    if (req.isAuthenticated()){
+        res.render("secrets");
+    } else {
+        res.redirect("/login");
+    }
+});
 
-    //////// This is how to use md5 /////////////
-    // const newUser = new User({
-    //     email: req.body.username,
-    //     // Use the hash function
-    //     password: md5(req.body.password)
-    // });
-    
-    newUser.save(function(err){
-        if(!err){
-            res.render("secrets");
-        } else{
-            console.log(err);
+app.get("/logout", function(req, res){
+    req.logOut(function(err){
+        if (!err){
+            res.redirect("/");
         }
     });
-});
+    
+})
+
+app.post("/register", function(req, res){
+    // Handle registration using passport
+    User.register({username: req.body.username}, req.body.password, function(err, user){
+        if (!err){
+            passport.authenticate("local")(req, res, function(){
+                // If the client gets in here it means that he was successfully registered
+                res.redirect("/secrets")
+            });
+        } else{
+            console.log(err);
+            res.redirect("/register");
+        }
+    })
 });
 
 app.post("/login", function(req, res){
-    const username = req.body.username;
-    const password = req.body.password;
-    ;
-
-    // When using the find method, the password get automatically decrypted
-    User.findOne({email: username}, function(err, foundUser){
-        if(!err){
-            if (foundUser){
-                /////// USE bcrypt TO LOGIN /////////////
-                bcrypt.compare(password, foundUser.password, function(err, result){
-                    if (result === true){
-                        res.render("secrets");
-                    }
-                });
-                // if (foundUser.password === password){
-                //     res.render("secrets");
-                // }
-                
-            }      
-        } else{
-          console.log(err);
-        }
+    const user = new User({
+        username: req.body.username,
+        password: req.body.password
     });
+    // The login function comes from passport
+    req.login(user, function(err){
+        if(!err){
+            passport.authenticate("local");
+            res.redirect("/secrets");
+        } else {
+            console.log(err);
+        }
+    })
+   
 });
-
-
-
-
 
 
 
